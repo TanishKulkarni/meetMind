@@ -24,6 +24,8 @@ func SetupRoutes(router *gin.Engine, db *pgx.Conn) {
 
 	router.GET("/api/meetings", meetingHandler.GetMeetings)
 
+	router.GET("/api/meetings/:id", meetingHandler.GetMeeting)
+
 	router.POST(
 		"/api/meetings/:id/upload",
 		meetingHandler.UploadMeetingAudio,

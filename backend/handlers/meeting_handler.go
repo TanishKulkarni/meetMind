@@ -248,7 +248,6 @@ func (h *MeetingHandler) CreateMeeting(c *gin.Context) {
 // ============================================================
 
 func (h *MeetingHandler) GetMeetings(c *gin.Context) {
-
 	query := `
 		SELECT
 			id,
@@ -259,31 +258,25 @@ func (h *MeetingHandler) GetMeetings(c *gin.Context) {
 			scheduled_at,
 			status,
 			audio_path,
+			transcript,
+			analysis,
 			created_at
 		FROM meetings
 		ORDER BY scheduled_at DESC
 	`
 
-	rows, err := h.DB.Query(
-		context.Background(),
-		query,
-	)
-
+	rows, err := h.DB.Query(context.Background(), query)
 	if err != nil {
-
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch meetings",
 		})
-
 		return
 	}
-
 	defer rows.Close()
 
 	meetings := []models.Meeting{}
 
 	for rows.Next() {
-
 		var meeting models.Meeting
 
 		err := rows.Scan(
@@ -295,15 +288,15 @@ func (h *MeetingHandler) GetMeetings(c *gin.Context) {
 			&meeting.ScheduledAt,
 			&meeting.Status,
 			&meeting.AudioPath,
+			&meeting.Transcript,
+			&meeting.Analysis,
 			&meeting.CreatedAt,
 		)
 
 		if err != nil {
-
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "Failed to read meeting data",
 			})
-
 			return
 		}
 
@@ -311,6 +304,71 @@ func (h *MeetingHandler) GetMeetings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, meetings)
+}
+
+func (h *MeetingHandler) GetMeeting(c *gin.Context) {
+	meetingID := c.Param("id")
+
+	id, err := strconv.Atoi(meetingID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid meeting ID",
+		})
+		return
+	}
+
+	query := `
+		SELECT
+			id,
+			title,
+			description,
+			host_name,
+			host_email,
+			scheduled_at,
+			status,
+			audio_path,
+			transcript,
+			analysis,
+			created_at
+		FROM meetings
+		WHERE id = $1
+	`
+
+	var meeting models.Meeting
+
+	err = h.DB.QueryRow(
+		context.Background(),
+		query,
+		id,
+	).Scan(
+		&meeting.ID,
+		&meeting.Title,
+		&meeting.Description,
+		&meeting.HostName,
+		&meeting.HostEmail,
+		&meeting.ScheduledAt,
+		&meeting.Status,
+		&meeting.AudioPath,
+		&meeting.Transcript,
+		&meeting.Analysis,
+		&meeting.CreatedAt,
+	)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Meeting not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch meeting",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, meeting)
 }
 
 // ============================================================
