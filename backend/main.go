@@ -1,16 +1,31 @@
 package main
 
 import (
-	"net/http"
+	"log"
+	"os"
+
+	"meet-ai/backend/config"
+	"meet-ai/backend/routes"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+
+	err := godotenv.Load()
+
+	if err != nil {
+		log.Println(".env file not found, using system environment variables")
+	}
+
+	db := config.ConnectDatabase()
+
+	defer db.Close(nil)
+
 	router := gin.Default()
 
-	// Allow requests from the Next.js frontend
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -18,13 +33,15 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// Health check endpoint
-	router.GET("/api/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"message": "Meet AI backend is running",
-		})
-	})
+	routes.SetupRoutes(router, db)
 
-	router.Run(":8080")
+	port := os.Getenv("PORT")
+
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Println("Server running on port", port)
+
+	router.Run(":" + port)
 }
