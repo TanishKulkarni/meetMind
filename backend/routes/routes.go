@@ -45,4 +45,8 @@ func SetupRoutes(router *gin.Engine, db *pgx.Conn) {
 		"/api/meetings/:id/process",
 		meetingHandler.ProcessMeeting,
 	)
+
+	router.GET("/api/tasks", meetingHandler.GetTasks)
+	router.GET("/api/meetings/:id/tasks", meetingHandler.GetMeetingTasks)
+	router.PATCH("/api/tasks/:id/status", meetingHandler.UpdateTaskStatus)
 }

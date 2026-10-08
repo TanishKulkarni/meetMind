@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -1007,6 +1008,19 @@ func (h *MeetingHandler) ProcessMeeting(c *gin.Context) {
 		return
 	}
 
+	// Save action items
+
+	err = h.saveActionItems(id, analysis)
+	if err != nil {
+		log.Println("Failed to save action items:", err)
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to save action items",
+			"details": err.Error(),
+		})
+		return
+	}
+
 	// ========================================================
 	// STEP 5: COMPLETED
 	// ========================================================
@@ -1037,5 +1051,292 @@ func (h *MeetingHandler) ProcessMeeting(c *gin.Context) {
 		"status":     "completed",
 		"transcript": transcription.Transcript,
 		"analysis":   analysis,
+	})
+}
+
+func (h *MeetingHandler) saveActionItems(meetingID int, analysis interface{}) error {
+	// Convert analysis to JSON
+	data, err := json.Marshal(analysis)
+	if err != nil {
+		return err
+	}
+
+	// Structure returned by Qwen
+	var result struct {
+		ActionItems []struct {
+			Task     string  `json:"task"`
+			Assignee *string `json:"assignee"`
+			Deadline *string `json:"deadline"`
+		} `json:"action_items"`
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return err
+	}
+
+	// Remove old tasks if the meeting is being processed again
+	_, err = h.DB.Exec(
+		context.Background(),
+		`DELETE FROM tasks WHERE meeting_id = $1`,
+		meetingID,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Save newly extracted action items
+	for _, item := range result.ActionItems {
+		_, err = h.DB.Exec(
+			context.Background(),
+			`
+			INSERT INTO tasks (
+				meeting_id,
+				task,
+				assignee,
+				deadline,
+				status
+			)
+			VALUES ($1, $2, $3, $4, 'pending')
+			`,
+			meetingID,
+			item.Task,
+			item.Assignee,
+			item.Deadline,
+		)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// GetTasks returns all tasks
+func (h *MeetingHandler) GetTasks(c *gin.Context) {
+	rows, err := h.DB.Query(
+		context.Background(),
+		`
+		SELECT
+			id,
+			meeting_id,
+			task,
+			assignee,
+			deadline,
+			status,
+			created_at
+		FROM tasks
+		ORDER BY created_at DESC
+		`,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch tasks",
+			"details": err.Error(),
+		})
+		return
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+
+	for rows.Next() {
+		var task models.Task
+
+		err := rows.Scan(
+			&task.ID,
+			&task.MeetingID,
+			&task.Task,
+			&task.Assignee,
+			&task.Deadline,
+			&task.Status,
+			&task.CreatedAt,
+		)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to read task",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed while reading tasks",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if tasks == nil {
+		tasks = []models.Task{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"tasks": tasks,
+	})
+}
+
+// GetMeetingTasks returns tasks for a specific meeting
+func (h *MeetingHandler) GetMeetingTasks(c *gin.Context) {
+	id := c.Param("id")
+
+	meetingID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid meeting ID",
+		})
+		return
+	}
+
+	rows, err := h.DB.Query(
+		context.Background(),
+		`
+		SELECT
+			id,
+			meeting_id,
+			task,
+			assignee,
+			deadline,
+			status,
+			created_at
+		FROM tasks
+		WHERE meeting_id = $1
+		ORDER BY created_at DESC
+		`,
+		meetingID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch meeting tasks",
+			"details": err.Error(),
+		})
+		return
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+
+	for rows.Next() {
+		var task models.Task
+
+		err := rows.Scan(
+			&task.ID,
+			&task.MeetingID,
+			&task.Task,
+			&task.Assignee,
+			&task.Deadline,
+			&task.Status,
+			&task.CreatedAt,
+		)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to read task",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed while reading tasks",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if tasks == nil {
+		tasks = []models.Task{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"tasks": tasks,
+	})
+}
+
+// UpdateTaskStatus updates the status of a task
+func (h *MeetingHandler) UpdateTaskStatus(c *gin.Context) {
+	id := c.Param("id")
+
+	taskID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid task ID",
+		})
+		return
+	}
+
+	var request struct {
+		Status string `json:"status"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	if request.Status != "pending" && request.Status != "completed" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Status must be pending or completed",
+		})
+		return
+	}
+
+	var task models.Task
+
+	err = h.DB.QueryRow(
+		context.Background(),
+		`
+		UPDATE tasks
+		SET status = $1
+		WHERE id = $2
+		RETURNING
+			id,
+			meeting_id,
+			task,
+			assignee,
+			deadline,
+			status,
+			created_at
+		`,
+		request.Status,
+		taskID,
+	).Scan(
+		&task.ID,
+		&task.MeetingID,
+		&task.Task,
+		&task.Assignee,
+		&task.Deadline,
+		&task.Status,
+		&task.CreatedAt,
+	)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Task not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to update task",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"task": task,
 	})
 }
