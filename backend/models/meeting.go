@@ -11,5 +11,6 @@ type Meeting struct {
 	ScheduledAt time.Time `json:"scheduled_at"`
 	Status      string    `json:"status"`
 	AudioPath   string    `json:"audio_path"`
+	Transcript  string    `json:"transcript"`
 	CreatedAt   time.Time `json:"created_at"`
 }

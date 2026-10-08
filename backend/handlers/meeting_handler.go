@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +21,13 @@ import (
 
 type MeetingHandler struct {
 	DB *pgx.Conn
+}
+
+type TranscriptionResponse struct {
+	Filename            string  `json:"filename"`
+	Language            string  `json:"language"`
+	LanguageProbability float64 `json:"language_probability"`
+	Transcript          string  `json:"transcript"`
 }
 
 func NewMeetingHandler(db *pgx.Conn) *MeetingHandler {
@@ -45,7 +56,7 @@ func (h *MeetingHandler) CreateMeeting(c *gin.Context) {
 		)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, title, description, host_name, host_email,
-		          scheduled_at, status, audio_path, created_at
+		          scheduled_at, status, audio_path, transcript, created_at
 	`
 
 	err := h.DB.QueryRow(
@@ -65,6 +76,7 @@ func (h *MeetingHandler) CreateMeeting(c *gin.Context) {
 		&meeting.ScheduledAt,
 		&meeting.Status,
 		&meeting.AudioPath,
+		&meeting.Transcript,
 		&meeting.CreatedAt,
 	)
 
@@ -232,5 +244,154 @@ func (h *MeetingHandler) UploadMeetingAudio(c *gin.Context) {
 		"meeting_id": id,
 		"file_name":  file.Filename,
 		"audio_path": filePath,
+	})
+}
+
+func (h *MeetingHandler) TranscribeMeeting(c *gin.Context) {
+
+	meetingID := c.Param("id")
+
+	id, err := strconv.Atoi(meetingID)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid meeting ID",
+		})
+		return
+	}
+
+	// Get audio path from database
+	var audioPath string
+
+	err = h.DB.QueryRow(
+		context.Background(),
+		"SELECT audio_path FROM meetings WHERE id = $1",
+		id,
+	).Scan(&audioPath)
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Meeting not found",
+		})
+		return
+	}
+
+	if audioPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "No audio file uploaded for this meeting",
+		})
+		return
+	}
+
+	// Open audio file
+	audioFile, err := os.Open(audioPath)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to open audio file",
+		})
+		return
+	}
+
+	defer audioFile.Close()
+
+	// Create multipart request
+	var requestBody bytes.Buffer
+
+	writer := multipart.NewWriter(&requestBody)
+
+	fileName := filepath.Base(audioPath)
+
+	part, err := writer.CreateFormFile("file", fileName)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to prepare audio file",
+		})
+		return
+	}
+
+	_, err = io.Copy(part, audioFile)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to read audio file",
+		})
+		return
+	}
+
+	err = writer.Close()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to prepare transcription request",
+		})
+		return
+	}
+
+	// Send audio to Python AI service
+	response, err := http.Post(
+		"http://127.0.0.1:8000/transcribe",
+		writer.FormDataContentType(),
+		&requestBody,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "AI transcription service unavailable",
+		})
+		return
+	}
+
+	defer response.Body.Close()
+
+	responseData, err := io.ReadAll(response.Body)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to read AI service response",
+		})
+		return
+	}
+
+	if response.StatusCode != http.StatusOK {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Transcription failed",
+			"details": string(responseData),
+		})
+		return
+	}
+
+	var transcription TranscriptionResponse
+
+	err = json.Unmarshal(responseData, &transcription)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Invalid response from AI service",
+		})
+		return
+	}
+
+	// Save transcript to database
+	_, err = h.DB.Exec(
+		context.Background(),
+		"UPDATE meetings SET transcript = $1 WHERE id = $2",
+		transcription.Transcript,
+		id,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to save transcript",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Meeting transcribed successfully",
+		"meeting_id": id,
+		"language":   transcription.Language,
+		"transcript": transcription.Transcript,
 	})
 }

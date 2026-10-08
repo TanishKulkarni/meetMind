@@ -1,0 +1,5 @@
+faster-whisper
+av==18.1.0
+fastapi
+uvicorn
+python-multipart
