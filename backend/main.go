@@ -22,7 +22,7 @@ func main() {
 
 	db := config.ConnectDatabase()
 
-	defer db.Close(nil)
+	defer db.Close()
 
 	router := gin.Default()
 

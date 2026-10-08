@@ -18,10 +18,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type MeetingHandler struct {
-	DB *pgx.Conn
+	DB *pgxpool.Pool
 }
 
 type TranscriptionResponse struct {
@@ -36,7 +37,7 @@ type AnalysisResponse struct {
 	Analysis map[string]interface{} `json:"analysis"`
 }
 
-func NewMeetingHandler(db *pgx.Conn) *MeetingHandler {
+func NewMeetingHandler(db *pgxpool.Pool) *MeetingHandler {
 	return &MeetingHandler{
 		DB: db,
 	}
@@ -268,8 +269,10 @@ func (h *MeetingHandler) GetMeetings(c *gin.Context) {
 
 	rows, err := h.DB.Query(context.Background(), query)
 	if err != nil {
+		log.Printf("GetMeetings Query Error: %v", err)
+
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch meetings",
+			"error": err.Error(),
 		})
 		return
 	}
@@ -295,13 +298,24 @@ func (h *MeetingHandler) GetMeetings(c *gin.Context) {
 		)
 
 		if err != nil {
+			log.Printf("GetMeetings Scan Error: %v", err)
+
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to read meeting data",
+				"error": err.Error(),
 			})
 			return
 		}
 
 		meetings = append(meetings, meeting)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("GetMeetings Rows Error: %v", err)
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, meetings)
