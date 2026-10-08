@@ -2,7 +2,12 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
 
 	"meet-ai/backend/models"
 
@@ -128,4 +133,104 @@ func (h *MeetingHandler) GetMeetings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, meetings)
+}
+
+func (h *MeetingHandler) UploadMeetingAudio(c *gin.Context) {
+
+	meetingID := c.Param("id")
+
+	id, err := strconv.Atoi(meetingID)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid meeting ID",
+		})
+		return
+	}
+
+	// Check whether meeting exists
+	var existingID int
+
+	err = h.DB.QueryRow(
+		context.Background(),
+		"SELECT id FROM meetings WHERE id = $1",
+		id,
+	).Scan(&existingID)
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Meeting not found",
+		})
+		return
+	}
+
+	// Get uploaded file
+	file, err := c.FormFile("audio")
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Audio file is required",
+		})
+		return
+	}
+
+	// Create uploads directory if it doesn't exist
+	err = os.MkdirAll("uploads", os.ModePerm)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create uploads directory",
+		})
+		return
+	}
+
+	// Generate unique filename
+	extension := filepath.Ext(file.Filename)
+
+	filename := fmt.Sprintf(
+		"meeting_%d_%d%s",
+		id,
+		time.Now().Unix(),
+		extension,
+	)
+
+	filePath := filepath.Join("uploads", filename)
+
+	// Save file
+	err = c.SaveUploadedFile(file, filePath)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to save audio file",
+		})
+		return
+	}
+
+	// Update database
+	query := `
+		UPDATE meetings
+		SET audio_path = $1
+		WHERE id = $2
+	`
+
+	_, err = h.DB.Exec(
+		context.Background(),
+		query,
+		filePath,
+		id,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to update meeting",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Meeting audio uploaded successfully",
+		"meeting_id": id,
+		"file_name":  file.Filename,
+		"audio_path": filePath,
+	})
 }
