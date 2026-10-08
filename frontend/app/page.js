@@ -70,21 +70,19 @@ export default function Home() {
           </div>
 
           <nav className="space-y-2">
-
             <a
               href="/"
-              className="flex items-center rounded-lg bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700"
+              className="block rounded-lg bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700"
             >
               Dashboard
             </a>
 
             <a
               href="/meetings"
-              className="flex items-center rounded-lg px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              className="block rounded-lg px-4 py-3 text-sm font-medium text-slate-600 hover:bg-slate-100"
             >
               Meetings
             </a>
-
           </nav>
 
           <div className="absolute bottom-6">
@@ -95,7 +93,7 @@ export default function Home() {
 
         </aside>
 
-        {/* Main Content */}
+        {/* Main */}
         <section className="flex-1 p-6 md:p-10">
 
           {/* Header */}
@@ -115,9 +113,12 @@ export default function Home() {
               </p>
             </div>
 
-            <button className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
+            <a
+              href="/meetings/new"
+              className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
               + New Meeting
-            </button>
+            </a>
 
           </div>
 
@@ -194,10 +195,16 @@ export default function Home() {
                     Create your first meeting to get started.
                   </p>
 
+                  <a
+                    href="/meetings/new"
+                    className="mt-5 inline-block rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Create Meeting
+                  </a>
+
                 </div>
               ) : (
                 <div>
-
                   {meetings.slice(0, 5).map((meeting) => (
                     <a
                       href={`/meetings/${meeting.id}`}
@@ -206,7 +213,6 @@ export default function Home() {
                     >
 
                       <div>
-
                         <h4 className="font-medium text-slate-900">
                           {meeting.title}
                         </h4>
@@ -214,14 +220,12 @@ export default function Home() {
                         <p className="mt-1 text-sm text-slate-500">
                           {formatDate(meeting.scheduled_at)}
                         </p>
-
                       </div>
 
                       <StatusBadge status={meeting.status} />
 
                     </a>
                   ))}
-
                 </div>
               )}
 

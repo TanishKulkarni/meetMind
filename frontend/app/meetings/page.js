@@ -65,6 +65,7 @@ export default function MeetingsPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
+
       <div className="flex min-h-screen">
 
         {/* Sidebar */}
@@ -98,18 +99,11 @@ export default function MeetingsPage() {
 
           </nav>
 
-          <div className="absolute bottom-6">
-            <p className="text-xs text-slate-400">
-              Meet AI v1.0
-            </p>
-          </div>
-
         </aside>
 
         {/* Main */}
         <section className="flex-1 p-6 md:p-10">
 
-          {/* Header */}
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
 
             <div>
@@ -126,9 +120,12 @@ export default function MeetingsPage() {
               </p>
             </div>
 
-            <button className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700">
+            <a
+              href="/meetings/new"
+              className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
               + New Meeting
-            </button>
+            </a>
 
           </div>
 
@@ -159,14 +156,13 @@ export default function MeetingsPage() {
 
           </div>
 
-          {/* Error */}
           {error && (
             <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
               {error}
             </div>
           )}
 
-          {/* Results */}
+          {/* Meetings */}
           <div className="mt-8 overflow-hidden rounded-xl border border-slate-200 bg-white">
 
             {loading ? (
@@ -177,10 +173,10 @@ export default function MeetingsPage() {
               <div className="p-12 text-center">
 
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
-                  <span className="text-xl">📅</span>
+                  📅
                 </div>
 
-                <h3 className="mt-4 font-semibold text-slate-900">
+                <h3 className="mt-4 font-semibold">
                   No meetings found
                 </h3>
 
@@ -203,7 +199,7 @@ export default function MeetingsPage() {
 
                       <div className="min-w-0">
 
-                        <h3 className="truncate font-semibold text-slate-900">
+                        <h3 className="truncate font-semibold">
                           {meeting.title}
                         </h3>
 
@@ -228,11 +224,13 @@ export default function MeetingsPage() {
                       </div>
 
                       <div className="flex items-center gap-4">
+
                         <StatusBadge status={meeting.status} />
 
                         <span className="text-slate-400">
                           →
                         </span>
+
                       </div>
 
                     </div>
@@ -254,6 +252,7 @@ export default function MeetingsPage() {
         </section>
 
       </div>
+
     </main>
   );
 }

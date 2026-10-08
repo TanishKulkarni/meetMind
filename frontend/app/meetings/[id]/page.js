@@ -17,7 +17,9 @@ export default function MeetingDetailsPage({ params }) {
     try {
       const { id } = await params;
 
-      const response = await fetch(`${API_URL}/api/meetings/${id}`);
+      const response = await fetch(
+        `${API_URL}/api/meetings/${id}`
+      );
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -52,14 +54,16 @@ export default function MeetingDetailsPage({ params }) {
     return (
       <main className="min-h-screen bg-slate-50 p-6">
         <div className="mx-auto max-w-4xl">
+
           <a
             href="/meetings"
-            className="text-sm font-medium text-blue-600 hover:text-blue-700"
+            className="text-sm font-medium text-blue-600"
           >
             ← Back to Meetings
           </a>
 
           <div className="mt-8 rounded-xl border border-red-200 bg-red-50 p-6">
+
             <h2 className="font-semibold text-red-800">
               Unable to load meeting
             </h2>
@@ -67,7 +71,9 @@ export default function MeetingDetailsPage({ params }) {
             <p className="mt-2 text-sm text-red-600">
               {error}
             </p>
+
           </div>
+
         </div>
       </main>
     );
@@ -89,9 +95,9 @@ export default function MeetingDetailsPage({ params }) {
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
+
       <div className="mx-auto max-w-6xl p-6 md:p-10">
 
-        {/* Back */}
         <a
           href="/meetings"
           className="text-sm font-medium text-blue-600 hover:text-blue-700"
@@ -100,39 +106,37 @@ export default function MeetingDetailsPage({ params }) {
         </a>
 
         {/* Header */}
-        <div className="mt-6 flex flex-col justify-between gap-5 md:flex-row md:items-start">
+        <div className="mt-6">
 
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
 
-              <h1 className="text-3xl font-bold tracking-tight">
-                {meeting.title}
-              </h1>
+            <h1 className="text-3xl font-bold tracking-tight">
+              {meeting.title}
+            </h1>
 
-              <StatusBadge status={meeting.status} />
+            <StatusBadge status={meeting.status} />
 
-            </div>
+          </div>
 
-            {meeting.description && (
-              <p className="mt-3 max-w-3xl text-slate-500">
-                {meeting.description}
-              </p>
-            )}
+          {meeting.description && (
+            <p className="mt-3 max-w-3xl text-slate-500">
+              {meeting.description}
+            </p>
+          )}
 
-            <div className="mt-4 flex flex-wrap gap-5 text-sm text-slate-500">
+          <div className="mt-4 flex flex-wrap gap-5 text-sm text-slate-500">
 
-              <span>
-                Host:{" "}
-                <span className="font-medium text-slate-700">
-                  {meeting.host_name || "Unknown"}
-                </span>
+            <span>
+              Host:{" "}
+              <span className="font-medium text-slate-700">
+                {meeting.host_name || "Unknown"}
               </span>
+            </span>
 
-              <span>
-                {formatDate(meeting.scheduled_at)}
-              </span>
+            <span>
+              {formatDate(meeting.scheduled_at)}
+            </span>
 
-            </div>
           </div>
 
         </div>
@@ -155,10 +159,9 @@ export default function MeetingDetailsPage({ params }) {
 
         </section>
 
-        {/* Key Points + Decisions */}
+        {/* Key Points / Decisions */}
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
 
-          {/* Key Points */}
           <section className="rounded-xl border border-slate-200 bg-white p-6">
 
             <SectionTitle
@@ -168,16 +171,20 @@ export default function MeetingDetailsPage({ params }) {
 
             {keyPoints.length > 0 ? (
               <ul className="mt-5 space-y-3">
+
                 {keyPoints.map((point, index) => (
                   <li
                     key={index}
                     className="flex gap-3 text-sm leading-6 text-slate-600"
                   >
+
                     <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-500" />
 
                     <span>{point}</span>
+
                   </li>
                 ))}
+
               </ul>
             ) : (
               <EmptySection text="No key points available." />
@@ -185,7 +192,6 @@ export default function MeetingDetailsPage({ params }) {
 
           </section>
 
-          {/* Decisions */}
           <section className="rounded-xl border border-slate-200 bg-white p-6">
 
             <SectionTitle
@@ -195,18 +201,22 @@ export default function MeetingDetailsPage({ params }) {
 
             {decisions.length > 0 ? (
               <ul className="mt-5 space-y-3">
+
                 {decisions.map((decision, index) => (
                   <li
                     key={index}
                     className="flex gap-3 text-sm leading-6 text-slate-600"
                   >
+
                     <span className="mt-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-600">
                       ✓
                     </span>
 
                     <span>{decision}</span>
+
                   </li>
                 ))}
+
               </ul>
             ) : (
               <EmptySection text="No decisions recorded." />
@@ -248,6 +258,7 @@ export default function MeetingDetailsPage({ params }) {
                 </thead>
 
                 <tbody>
+
                   {actionItems.map((item, index) => (
                     <tr
                       key={index}
@@ -268,6 +279,7 @@ export default function MeetingDetailsPage({ params }) {
 
                     </tr>
                   ))}
+
                 </tbody>
 
               </table>
@@ -302,6 +314,7 @@ export default function MeetingDetailsPage({ params }) {
         </section>
 
       </div>
+
     </main>
   );
 }
@@ -309,6 +322,7 @@ export default function MeetingDetailsPage({ params }) {
 function SectionTitle({ title, description }) {
   return (
     <div>
+
       <h2 className="text-lg font-semibold text-slate-900">
         {title}
       </h2>
@@ -316,6 +330,7 @@ function SectionTitle({ title, description }) {
       <p className="mt-1 text-sm text-slate-400">
         {description}
       </p>
+
     </div>
   );
 }
