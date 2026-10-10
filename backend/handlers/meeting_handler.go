@@ -1010,13 +1010,13 @@ func (h *MeetingHandler) ProcessMeeting(c *gin.Context) {
 }
 
 func (h *MeetingHandler) saveActionItems(meetingID int, analysis interface{}) error {
-	// Convert analysis to JSON
+	// Convert analysis to JSON.
 	data, err := json.Marshal(analysis)
 	if err != nil {
 		return err
 	}
 
-	// Structure returned by Qwen
+	// Structure returned by Qwen.
 	var result struct {
 		ActionItems []struct {
 			Task     string  `json:"task"`
@@ -1029,9 +1029,18 @@ func (h *MeetingHandler) saveActionItems(meetingID int, analysis interface{}) er
 		return err
 	}
 
-	// Remove old tasks if the meeting is being processed again
-	_, err = h.DB.Exec(
-		context.Background(),
+	// Start a database transaction.
+	ctx := context.Background()
+
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Remove existing tasks inside the transaction.
+	_, err = tx.Exec(
+		ctx,
 		`DELETE FROM tasks WHERE meeting_id = $1`,
 		meetingID,
 	)
@@ -1039,20 +1048,18 @@ func (h *MeetingHandler) saveActionItems(meetingID int, analysis interface{}) er
 		return err
 	}
 
-	// Save newly extracted action items
+	// Insert all newly extracted action items.
 	for _, item := range result.ActionItems {
-		_, err = h.DB.Exec(
-			context.Background(),
-			`
-			INSERT INTO tasks (
+		_, err = tx.Exec(
+			ctx,
+			`INSERT INTO tasks (
 				meeting_id,
 				task,
 				assignee,
 				deadline,
 				status
 			)
-			VALUES ($1, $2, $3, $4, 'pending')
-			`,
+			VALUES ($1, $2, $3, $4, 'pending')`,
 			meetingID,
 			item.Task,
 			item.Assignee,
@@ -1062,6 +1069,11 @@ func (h *MeetingHandler) saveActionItems(meetingID int, analysis interface{}) er
 		if err != nil {
 			return err
 		}
+	}
+
+	// Commit only after every insert succeeds.
+	if err := tx.Commit(ctx); err != nil {
+		return err
 	}
 
 	return nil
