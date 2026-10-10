@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -830,234 +831,174 @@ func (h *MeetingHandler) AnalyzeMeeting(c *gin.Context) {
 // ============================================================
 
 func (h *MeetingHandler) ProcessMeeting(c *gin.Context) {
-
-	meetingID := c.Param("id")
-
-	id, err := strconv.Atoi(meetingID)
-
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid meeting ID",
 		})
-
 		return
 	}
 
-	// Get audio path
-
+	// Atomically claim the meeting so concurrent requests cannot
+	// process it at the same time. Failed meetings can be retried.
 	var audioPath string
-
 	err = h.DB.QueryRow(
-		context.Background(),
-		"SELECT audio_path FROM meetings WHERE id = $1",
+		c.Request.Context(),
+		`UPDATE meetings
+         SET status = 'transcribing', error_message = NULL
+         WHERE id = $1
+           AND COALESCE(audio_path, '') <> ''
+           AND status NOT IN ('transcribing', 'analyzing')
+         RETURNING audio_path`,
 		id,
 	).Scan(&audioPath)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			var status string
+			var existingAudioPath string
 
-		if err == pgx.ErrNoRows {
+			lookupErr := h.DB.QueryRow(
+				c.Request.Context(),
+				`SELECT status, COALESCE(audio_path, '')
+                 FROM meetings WHERE id = $1`,
+				id,
+			).Scan(&status, &existingAudioPath)
 
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "Meeting not found",
+			if errors.Is(lookupErr, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": "Meeting not found",
+				})
+				return
+			}
+
+			if lookupErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "Failed to check meeting status",
+				})
+				return
+			}
+
+			if existingAudioPath == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "No audio uploaded for this meeting",
+				})
+				return
+			}
+
+			if status == "transcribing" || status == "analyzing" {
+				c.JSON(http.StatusConflict, gin.H{
+					"error": "Meeting is already being processed",
+				})
+				return
+			}
+
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Meeting could not be claimed for processing",
 			})
-
 			return
 		}
 
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch meeting",
+			"error": "Failed to start meeting processing",
 		})
-
 		return
 	}
 
-	if audioPath == "" {
-
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "No audio file uploaded for this meeting",
-		})
-
-		return
-	}
-
-	// ========================================================
-	// STEP 1: TRANSCRIBING
-	// ========================================================
-
-	_, err = h.DB.Exec(
-		context.Background(),
-		"UPDATE meetings SET status = $1 WHERE id = $2",
-		"transcribing",
-		id,
-	)
-
-	if err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to update meeting status",
-		})
-
-		return
-	}
-
-	// ========================================================
-	// STEP 2: TRANSCRIBE
-	// ========================================================
-
-	transcription, err := h.transcribeAudio(
-		audioPath,
-	)
-
-	if err != nil {
-
-		h.DB.Exec(
+	// Save the failure reason whenever a processing stage fails.
+	fail := func(stage string, cause error) {
+		_, dbErr := h.DB.Exec(
 			context.Background(),
-			"UPDATE meetings SET status = $1 WHERE id = $2",
-			"failed",
+			`UPDATE meetings
+             SET status = 'failed', error_message = $1
+             WHERE id = $2`,
+			stage+": "+cause.Error(),
 			id,
 		)
 
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Transcription failed",
-			"details": err.Error(),
-		})
+		if dbErr != nil {
+			log.Printf(
+				"Failed to persist processing error for meeting %d: %v",
+				id, dbErr,
+			)
+		}
 
-		return
-	}
-
-	// Save transcript
-
-	_, err = h.DB.Exec(
-		context.Background(),
-		"UPDATE meetings SET transcript = $1 WHERE id = $2",
-		transcription.Transcript,
-		id,
-	)
-
-	if err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to save transcript",
-		})
-
-		return
-	}
-
-	// ========================================================
-	// STEP 3: ANALYZING
-	// ========================================================
-
-	_, err = h.DB.Exec(
-		context.Background(),
-		"UPDATE meetings SET status = $1 WHERE id = $2",
-		"analyzing",
-		id,
-	)
-
-	if err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to update meeting status",
-		})
-
-		return
-	}
-
-	// ========================================================
-	// STEP 4: ANALYZE
-	// ========================================================
-
-	analysis, err := h.analyzeTranscript(
-		transcription.Transcript,
-	)
-
-	if err != nil {
-
-		h.DB.Exec(
-			context.Background(),
-			"UPDATE meetings SET status = $1 WHERE id = $2",
-			"failed",
-			id,
+		log.Printf(
+			"Meeting %d failed during %s: %v",
+			id, stage, cause,
 		)
 
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Meeting analysis failed",
-			"details": err.Error(),
+			"error":   stage + " failed",
+			"details": cause.Error(),
 		})
-
-		return
 	}
 
-	// Convert analysis to JSON
-
-	analysisJSON, err := json.Marshal(
-		analysis,
-	)
-
+	// 1. Transcribe the audio.
+	transcription, err := h.transcribeAudio(audioPath)
 	if err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to process analysis",
-		})
-
+		fail("Transcription", err)
 		return
 	}
 
-	// Save analysis
-
+	// 2. Save the transcript and advance the status.
 	_, err = h.DB.Exec(
-		context.Background(),
-		"UPDATE meetings SET analysis = $1 WHERE id = $2",
+		c.Request.Context(),
+		`UPDATE meetings
+         SET transcript = $1, status = 'analyzing'
+         WHERE id = $2`,
+		transcription.Transcript,
+		id,
+	)
+	if err != nil {
+		fail("Saving transcript", err)
+		return
+	}
+
+	// 3. Analyze the transcript with the existing AI service.
+	analysis, err := h.analyzeTranscript(transcription.Transcript)
+	if err != nil {
+		fail("AI analysis", err)
+		return
+	}
+
+	// 4. Serialize the analysis result.
+	analysisJSON, err := json.Marshal(analysis)
+	if err != nil {
+		fail("Encoding analysis", err)
+		return
+	}
+
+	// 5. Save the analysis.
+	_, err = h.DB.Exec(
+		c.Request.Context(),
+		`UPDATE meetings SET analysis = $1 WHERE id = $2`,
 		analysisJSON,
 		id,
 	)
-
 	if err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to save meeting analysis",
-		})
-
+		fail("Saving analysis", err)
 		return
 	}
 
-	// Save action items
-
-	err = h.saveActionItems(id, analysis)
-	if err != nil {
-		log.Println("Failed to save action items:", err)
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to save action items",
-			"details": err.Error(),
-		})
+	// 6. Save extracted action items.
+	if err := h.saveActionItems(id, analysis); err != nil {
+		fail("Saving action items", err)
 		return
 	}
 
-	// ========================================================
-	// STEP 5: COMPLETED
-	// ========================================================
-
+	// 7. Mark the meeting complete only after all stages succeed.
 	_, err = h.DB.Exec(
-		context.Background(),
-		"UPDATE meetings SET status = $1 WHERE id = $2",
-		"completed",
+		c.Request.Context(),
+		`UPDATE meetings
+         SET status = 'completed', error_message = NULL
+         WHERE id = $1`,
 		id,
 	)
-
 	if err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to update meeting status",
-		})
-
+		fail("Completing meeting", err)
 		return
 	}
-
-	// ========================================================
-	// FINAL RESPONSE
-	// ========================================================
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Meeting processed successfully",
